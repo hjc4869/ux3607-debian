@@ -1,0 +1,30 @@
+#!/bin/sh
+set -eu
+
+case "${1:-}" in
+    prereqs) exit 0 ;;
+esac
+. /usr/share/initramfs-tools/hook-functions
+
+for subsystem in clk/qcom phy/qualcomm phy/freescale pinctrl/qcom regulator \
+    interconnect/qcom soc/qcom remoteproc rpmsg power/supply usb/typec dma/qcom; do
+    directory="/lib/modules/$version/kernel/drivers/$subsystem"
+    test -d "$directory" || continue
+    find "$directory" -type f -name '*.ko*' | while IFS= read -r module_path; do
+        module_name=${module_path##*/}
+        manual_add_modules "${module_name%%.ko*}"
+    done
+done
+for module_name in dwc3 dwc3-qcom dwc3-generic-plat xhci-hcd xhci-plat-hcd \
+    usb-storage uas i2c-qcom-geni i2c-hid-of hid-asus hid-generic \
+    phy-nxp-ptn3222 simpledrm msm ext4 virtio_blk virtio_pci virtio_mmio; do
+    manual_add_modules "$module_name"
+done
+if test -d /lib/firmware/qcom/glymur/ASUSTeK/UX3607OA; then
+    mkdir -p "$DESTDIR/lib/firmware/qcom/glymur/ASUSTeK"
+    cp -a /lib/firmware/qcom/glymur/ASUSTeK/UX3607OA "$DESTDIR/lib/firmware/qcom/glymur/ASUSTeK/"
+fi
+for firmware_path in /lib/firmware/qcom/gen80100_* /lib/firmware/qcom/glymur/gen80100_zap.mbn; do
+    test -f "$firmware_path" || continue
+    copy_file firmware "$firmware_path"
+done

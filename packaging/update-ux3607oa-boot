@@ -1,0 +1,44 @@
+#!/bin/sh
+set -eu
+
+test -r /etc/ux3607oa/image.conf || exit 0
+. /etc/ux3607oa/image.conf
+kernel_release=$(find /boot -maxdepth 1 -name 'vmlinuz-*-ux3607oa' -printf '%f\n' | sort -V | tail -n 1)
+kernel_release=${kernel_release#vmlinuz-}
+test -n "$kernel_release" || exit 0
+test -s "/boot/initrd.img-$kernel_release" || exit 0
+dtb="/usr/lib/linux-image-$kernel_release/qcom/glymur-asus-zenbook-a16-ux3607oa.dtb"
+test -s "$dtb"
+mkdir -p /boot/grub
+cat > /boot/grub/grub.cfg <<EOF
+set timeout=10
+set default=0
+insmod all_video
+terminal_output console
+search --no-floppy --fs-uuid --set=root $ROOT_UUID
+menuentry 'Debian sid - ASUS UX3607OA' {
+    linux /boot/vmlinuz-$kernel_release root=UUID=$ROOT_UUID rw rootwait acpi=off console=tty0
+    initrd /boot/initrd.img-$kernel_release
+    devicetree $dtb
+}
+menuentry 'Debian sid - ASUS UX3607OA - basic display' {
+    linux /boot/vmlinuz-$kernel_release root=UUID=$ROOT_UUID rw rootwait acpi=off console=tty0 nomodeset module_blacklist=msm
+    initrd /boot/initrd.img-$kernel_release
+    devicetree $dtb
+}
+menuentry 'Debian sid - QEMU ARM64 validation only' {
+    linux /boot/vmlinuz-$kernel_release root=UUID=$ROOT_UUID rw rootwait console=ttyAMA0,115200 systemd.unit=multi-user.target
+    initrd /boot/initrd.img-$kernel_release
+}
+EOF
+grub-script-check /boot/grub/grub.cfg
+if mountpoint -q /boot/efi; then
+    mkdir -p /boot/efi/EFI/BOOT
+    early_config=$(mktemp)
+    trap 'rm -f "$early_config"' EXIT HUP INT TERM
+    printf 'search --no-floppy --fs-uuid --set=root %s\nconfigfile /boot/grub/grub.cfg\n' \
+        "$ROOT_UUID" > "$early_config"
+    grub-mkstandalone --format=arm64-efi --locales='' --fonts='' \
+        --modules='part_gpt fat ext2 normal linux search search_fs_uuid configfile gzio all_video efi_gop' \
+        --output=/boot/efi/EFI/BOOT/BOOTAA64.EFI "boot/grub/grub.cfg=$early_config"
+fi

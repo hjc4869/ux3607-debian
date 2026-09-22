@@ -1,0 +1,69 @@
+#!/usr/bin/expect -f
+set timeout 180
+set variant [lindex $argv 0]
+if {$variant ni {cli kde}} {
+    puts stderr "Usage: expect scripts/test-uefi.exp cli|kde"
+    exit 2
+}
+set project_dir [file normalize [file join [file dirname [info script]] ..]]
+set image_path "$project_dir/artifacts/debian-sid-ux3607oa-$variant.img"
+set variables_path "$project_dir/work/uefi-$variant-vars.fd"
+file copy -force /usr/share/AAVMF/AAVMF_VARS.fd $variables_path
+log_file -a -noappend "$project_dir/artifacts/$variant-uefi-boot.log"
+log_user 0
+set stage "UEFI boot"
+expect_after {
+    timeout { puts stderr "Timed out during $stage"; catch {close}; catch {wait}; exit 1 }
+    eof { puts stderr "Unexpected QEMU exit during $stage"; exit 1 }
+}
+spawn qemu-system-aarch64 -machine virt -cpu max -accel tcg,thread=multi -smp 4 -m 4096 \
+    -drive if=pflash,format=raw,readonly=on,file=/usr/share/AAVMF/AAVMF_CODE.no-secboot.fd \
+    -drive if=pflash,format=raw,file=$variables_path \
+    -device qemu-xhci -drive if=none,id=stick,format=raw,snapshot=on,file=$image_path \
+    -device usb-storage,drive=stick,bootindex=1 \
+    -device virtio-rng-pci \
+    -netdev user,id=net0 -device virtio-net-pci,netdev=net0 \
+    -display none -serial stdio -monitor none -no-reboot
+expect {
+    -re {QEMU ARM64 validation} { send "\033\[B\033\[B\r" }
+    timeout { puts stderr "UEFI did not reach the GRUB menu"; exit 1 }
+    eof { puts stderr "QEMU exited before GRUB"; exit 1 }
+}
+expect {
+    -re {ux3607oa login:} { send "debian\r" }
+    timeout { puts stderr "Kernel did not reach a login prompt"; exit 1 }
+    eof { puts stderr "QEMU exited before login"; exit 1 }
+}
+set stage "initial login"
+expect "Password:"
+send "debian\r"
+expect "Current password:"
+send "debian\r"
+expect "New password:"
+send "Qemu-Validation-2026!\r"
+expect "Retype new password:"
+send "Qemu-Validation-2026!\r"
+expect -re {debian@ux3607oa.*\$ }
+set stage "plain test shell"
+send {stty -echo; exec env TERM=dumb PS1='UX3607-TEST> ' SYSTEMD_PAGER=cat bash --noprofile --norc -i}
+send "\r"
+expect -re {UX3607-TEST> $}
+set stage "sudo authentication"
+send "sudo -p 'UX3607-SUDO: ' -v\r"
+expect -exact "UX3607-SUDO: "
+send "Qemu-Validation-2026!\r"
+expect -re {UX3607-TEST> $}
+set stage "package and service validation"
+send {uname -a; findmnt /; dpkg-query -W linux-image-7.3.0-rc4-ux3607oa ux3607oa-boot-support; sudo -n apt-get check && test -z "$(sudo -n dpkg --audit)" && test "$(uname -r)" = 7.3.0-rc4-ux3607oa && systemctl is-active NetworkManager && printf '\nUX3607_BOOT_VALIDATED\n'}
+send "\r"
+expect {
+    -re {[\r\n]UX3607_BOOT_VALIDATED[\r\n]} {}
+    timeout { puts stderr "Guest package or service validation failed"; exit 1 }
+}
+expect -re {UX3607-TEST> $}
+set stage "shutdown"
+send "sudo -n poweroff\r"
+expect eof
+set result [wait]
+if {[lindex $result 3] != 0} { exit 1 }
+puts "UEFI USB boot validation passed: $variant"
