@@ -9,12 +9,12 @@ mkdir -p "$package_dir/DEBIAN" "$package_dir/usr/sbin" \
     "$package_dir/etc/initramfs/post-update.d" "$project_dir/artifacts/packages"
 cat > "$package_dir/DEBIAN/control" <<'EOF'
 Package: ux3607oa-boot-support
-Version: 1.0-4
+Version: 1.0-6
 Architecture: arm64
 Maintainer: UX3607OA Local Image Builder <builder@ux3607oa.invalid>
 Section: admin
 Priority: optional
-Depends: linux-image-7.3.0-rc4-ux3607oa (= 7.3~rc4-1+ux3607oa2), initramfs-tools, linux-base, grub-efi-arm64-bin, util-linux, wireless-regdb, firmware-qcom-soc, firmware-atheros
+Depends: linux-image-7.3.0-rc4-ux3607oa (= 7.3~rc4-1+ux3607oa4), initramfs-tools, linux-base, grub-efi-arm64-bin, util-linux, wireless-regdb, firmware-qcom-soc, firmware-atheros
 Description: USB boot integration for ASUS Zenbook A16 UX3607OA
  Device-tree-aware removable UEFI boot, Qualcomm initramfs dependencies,
  and kernel update hooks for the locally packaged Debian-derived kernel.
@@ -40,4 +40,4 @@ chmod 755 "$package_dir/DEBIAN/postinst"
 printf '%s\n' /etc/kernel/postinst.d/zz-ux3607oa /etc/kernel/postrm.d/zz-ux3607oa \
     /etc/initramfs/post-update.d/zz-ux3607oa > "$package_dir/DEBIAN/conffiles"
 dpkg-deb --root-owner-group --build "$package_dir" \
-    "$project_dir/artifacts/packages/ux3607oa-boot-support_1.0-4_arm64.deb"
+    "$project_dir/artifacts/packages/ux3607oa-boot-support_1.0-6_arm64.deb"

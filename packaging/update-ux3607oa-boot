@@ -22,7 +22,7 @@ menuentry 'Debian sid - ASUS UX3607OA' {
     devicetree $dtb
 }
 menuentry 'Debian sid - ASUS UX3607OA - basic display' {
-    linux /boot/vmlinuz-$kernel_release root=UUID=$ROOT_UUID rw rootwait acpi=off console=tty0 nomodeset module_blacklist=msm
+    linux /boot/vmlinuz-$kernel_release root=UUID=$ROOT_UUID rw rootwait acpi=off console=tty0 nomodeset module_blacklist=msm clk_ignore_unused pd_ignore_unused
     initrd /boot/initrd.img-$kernel_release
     devicetree $dtb
 }

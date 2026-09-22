@@ -63,7 +63,7 @@ configure_cli() {
     [[ -s "$artifacts_dir/kernel/release" ]]
     local kernel_release
     kernel_release=$(< "$artifacts_dir/kernel/release")
-    [[ -f "$artifacts_dir/packages/linux-image-${kernel_release}_7.3~rc4-1+ux3607oa2_arm64.deb" ]]
+    [[ -f "$artifacts_dir/packages/linux-image-${kernel_release}_7.3~rc4-1+ux3607oa4_arm64.deb" ]]
     policy_rc "$cli_root"
     mkdir -p "$cli_root/usr/local/share/ux3607oa/repository" "$cli_root/etc/initramfs-tools/conf.d"
     cp "$artifacts_dir/packages/"*.deb "$cli_root/usr/local/share/ux3607oa/repository/"

@@ -31,9 +31,24 @@ file "$mount_dir/boot/efi/EFI/BOOT/BOOTAA64.EFI"
 file "$mount_dir/boot/efi/EFI/BOOT/BOOTAA64.EFI" | grep -Eq 'Aarch64|ARM64'
 kernel_release=$(< "$project_dir/artifacts/kernel/release")
 [[ -s "$mount_dir/boot/vmlinuz-$kernel_release" && -s "$mount_dir/boot/initrd.img-$kernel_release" ]]
+if ! grep -qx 'CONFIG_SYSFB_SIMPLEFB=y' "$mount_dir/boot/config-$kernel_release"; then
+    printf 'Missing EFI-to-simpledrm framebuffer handoff configuration\n' >&2
+    exit 1
+fi
+grep -Eq '^CONFIG_DRM_SIMPLEDRM=[ym]$' "$mount_dir/boot/config-$kernel_release"
+if grep -qx 'CONFIG_DRM_SIMPLEDRM=m' "$mount_dir/boot/config-$kernel_release"; then
+    lsinitramfs "$mount_dir/boot/initrd.img-$kernel_release" \
+        | grep -E '(^|/)simpledrm[.]ko([.](xz|gz|zst))?$' > /dev/null
+fi
 dtb_path="/usr/lib/linux-image-$kernel_release/qcom/glymur-asus-zenbook-a16-ux3607oa.dtb"
 [[ $(fdtget "$mount_dir$dtb_path" / compatible) == 'asus,zenbook-a16-ux3607oa qcom,glymur' ]]
 chroot "$mount_dir" grub-script-check /boot/grub/grub.cfg
+recovery_arguments=$(awk '/^menuentry .*basic display/ {recovery=1} recovery && $1 == "linux" {print; exit}' "$mount_dir/boot/grub/grub.cfg")
+default_arguments=$(awk '$1 == "linux" {print; exit}' "$mount_dir/boot/grub/grub.cfg")
+for argument in nomodeset module_blacklist=msm clk_ignore_unused pd_ignore_unused; do
+    [[ " $recovery_arguments " == *" $argument "* ]]
+    [[ " $default_arguments " != *" $argument "* ]]
+done
 chroot "$mount_dir" dpkg-query -W "-f=\${Package}\t\${Version}\t\${db:Status-Status}\n" \
     "linux-image-$kernel_release" ux3607oa-boot-support firmware-ux3607oa-local wireless-regdb
 [[ -z $(chroot "$mount_dir" dpkg --audit) ]]

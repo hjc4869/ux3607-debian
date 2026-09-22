@@ -2,7 +2,8 @@
 set -Eeuo pipefail
 
 project_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
-source_dir="$project_dir/work/linux"
+pristine_source_dir="$project_dir/work/linux"
+patch_dir="$project_dir/patches/linux"
 build_dir="$project_dir/work/kernel-debian"
 kernel_commit=93f51579e7df248780214094418f205253383cc5
 jobs=${JOBS:-$(nproc)}
@@ -10,11 +11,40 @@ config_package=linux-config-7.2_7.2.6-1_arm64.deb
 config_sha256=3077a50e9fb9764ac3e7b0e92200ba1fa23747857ce55213ab26ee81e3eb120c
 
 mkdir -p "$build_dir" "$project_dir/artifacts/kernel" "$project_dir/artifacts/packages"
-if [[ ! -d "$source_dir/.git" ]]; then
-    git clone --depth 1 --branch v7.3-rc4 https://github.com/torvalds/linux.git "$source_dir"
+if [[ ! -d "$pristine_source_dir/.git" ]]; then
+    git clone --depth 1 --branch v7.3-rc4 https://github.com/torvalds/linux.git "$pristine_source_dir"
+fi
+[[ $(git -C "$pristine_source_dir" rev-parse HEAD) == "$kernel_commit" ]]
+[[ -z $(git -C "$pristine_source_dir" status --porcelain --untracked-files=no) ]]
+mapfile -t patch_series < <(grep -vE '^[[:space:]]*(#|$)' "$patch_dir/series")
+[[ ${#patch_series[@]} -gt 0 ]]
+for patch_name in "${patch_series[@]}"; do
+    [[ $patch_name =~ ^[0-9]{4}-[a-z0-9-]+\.patch$ && -s "$patch_dir/$patch_name" ]]
+done
+(cd "$patch_dir" && sha256sum series "${patch_series[@]}") \
+    > "$project_dir/artifacts/kernel/patches.sha256"
+patchset_hash=$(sha256sum "$project_dir/artifacts/kernel/patches.sha256" | cut -d ' ' -f 1)
+source_dir="$project_dir/work/linux-patched-${patchset_hash:0:12}"
+patch_state="$project_dir/work/kernel-patches-$patchset_hash.tree"
+if [[ ! -e "$source_dir/.git" ]]; then
+    git -C "$pristine_source_dir" worktree add --detach "$source_dir" "$kernel_commit"
 fi
 [[ $(git -C "$source_dir" rev-parse HEAD) == "$kernel_commit" ]]
-[[ -z $(git -C "$source_dir" status --porcelain --untracked-files=no) ]]
+if [[ ! -f $patch_state ]]; then
+    [[ -z $(git -C "$source_dir" status --porcelain) ]] || {
+        printf 'Refusing to overwrite unexpected changes in %s\n' "$source_dir" >&2
+        exit 1
+    }
+    for patch_name in "${patch_series[@]}"; do
+        git -C "$source_dir" apply --check --index "$patch_dir/$patch_name"
+        git -C "$source_dir" apply --index "$patch_dir/$patch_name"
+    done
+    git -C "$source_dir" write-tree > "$patch_state"
+fi
+[[ $(git -C "$source_dir" write-tree) == "$(< "$patch_state")" ]]
+git -C "$source_dir" diff --quiet
+[[ -z $(git -C "$source_dir" ls-files --others --exclude-standard) ]]
+git -C "$source_dir" diff --cached --check
 
 if [[ ! -f "$project_dir/work/$config_package" ]]; then
     curl -fL --retry 3 -o "$project_dir/work/$config_package" \
@@ -27,8 +57,9 @@ xz -dc "$project_dir/work/debian-config/usr/src/linux-config-7.2/config.arm64_no
 
 export KBUILD_BUILD_USER=ux3607-builder KBUILD_BUILD_HOST=debian KBUILD_BUILD_VERSION=1
 export DEBFULLNAME='UX3607OA Local Kernel Builder' DEBEMAIL=builder@ux3607oa.invalid
-export KDEB_PKGVERSION=7.3~rc4-1+ux3607oa2 KDEB_SOURCENAME=linux-ux3607oa
+export KDEB_PKGVERSION=7.3~rc4-1+ux3607oa4 KDEB_SOURCENAME=linux-ux3607oa
 export KDEB_CHANGELOG_DIST=unstable KBUILD_DEBARCH=arm64
+export LOCALVERSION=
 export DEB_BUILD_PROFILES='pkg.linux-ux3607oa.nokernelheaders pkg.linux-ux3607oa.nokerneldbg'
 export DPKG_DEB_COMPRESSOR_TYPE=xz
 SOURCE_DATE_EPOCH=$(git -C "$source_dir" show -s --format=%ct HEAD)
@@ -40,7 +71,7 @@ install -m 644 "$project_dir/artifacts/kernel/debian-arm64-7.2.6.config" "$build
 "$source_dir/scripts/kconfig/merge_config.sh" -m -O "$build_dir" \
     "$build_dir/.config" "$project_dir/config/kernel.config"
 make "${make_args[@]}" olddefconfig
-while IFS= read -r setting; do
+while IFS= read -r setting || [[ -n $setting ]]; do
     if ! grep -Fqx -- "$setting" "$build_dir/.config"; then
         printf 'Unresolved kernel setting: %s\n' "$setting" >&2
         exit 1
@@ -64,5 +95,6 @@ install -m 644 "$build_dir/.config" "$project_dir/artifacts/kernel/config-$kerne
 install -m 644 "$build_dir/System.map" "$project_dir/artifacts/kernel/System.map-$kernel_release"
 printf '%s\n' "$kernel_release" > "$project_dir/artifacts/kernel/release"
 printf '%s\n' "$kernel_commit" > "$project_dir/artifacts/kernel/source-commit"
+install -m 644 "$patch_state" "$project_dir/artifacts/kernel/source-tree"
 fdtget "$project_dir/artifacts/kernel/glymur-asus-zenbook-a16-ux3607oa.dtb" / compatible
 file "$project_dir/artifacts/kernel/Image"

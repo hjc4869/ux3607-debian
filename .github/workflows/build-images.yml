@@ -6,6 +6,7 @@ on:
       - .github/**
       - .gitignore
       - config/**
+      - patches/**
       - packaging/**
       - scripts/**
   pull_request:
@@ -13,6 +14,7 @@ on:
       - .github/**
       - .gitignore
       - config/**
+      - patches/**
       - packaging/**
       - scripts/**
   workflow_dispatch:
@@ -171,6 +173,9 @@ jobs:
             artifacts/*-disk-check.log
             artifacts/*-packages.tsv
             artifacts/board-firmware-sha256.txt
+            artifacts/wifi-board-*.txt
+            artifacts/kernel/patches.sha256
+            artifacts/kernel/source-tree
             artifacts/kernel/debian-config-delta.txt
             artifacts/SHA256SUMS
           if-no-files-found: warn

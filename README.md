@@ -33,8 +33,11 @@ Touchscreen support was untested. Iris video acceleration was deferred.
 The [board commit](https://github.com/torvalds/linux/commit/e8fbbca94db752ab94d9dadf2f65872905eafecd)
 is merged into the 7.3 development series, not 7.2. The selected upstream release
 also contains the board's QSEECOM allowlist entry, SoCCP support, TCSR support,
-Glymur display PHY support, and PCI power-control support. No board patches are
-applied on top of the upstream source.
+basic Glymur display PHY support, and PCI power-control support. The board DTS
+alone does not provide all working-device prerequisites. The build now applies
+the six-patch [kernel series](patches/linux/README.md), including the missing
+eDP v8 programming fixes and generic QCC2072 UART/M.2 Bluetooth support. No
+unrelated board DTS overlays or speculative HDMI clock workarounds are applied.
 
 Kernel: **7.3.0-rc4-ux3607oa**, upstream tag `v7.3-rc4`, commit
 `93f51579e7df248780214094418f205253383cc5` (2026-09-20).
@@ -49,21 +52,50 @@ It is migrated with `olddefconfig`, not replaced with ARM64 defconfig.
 
 [config/kernel.config](config/kernel.config) contains the small local delta:
 kernel identity/signing settings, Glymur clocks/interconnect, its required M31
-eUSB2 PHY, and simpledrm fallback. Debian's module, security, filesystem and
+eUSB2 PHY, the SM8650 LPASS pinctrl fallback used by Glymur audio, and simpledrm
+fallback with `CONFIG_SYSFB_SIMPLEFB=y` for EFI handoff.
+Debian's module, security, filesystem and
 debug/BTF settings are retained where supported by upstream and the toolchain.
 Removed/new symbols and unavailable Rust settings are recorded in
 `artifacts/kernel/debian-config-delta.txt`; the untouched baseline and final
 configuration are saved alongside it.
 
-The images install these packages through apt from a root-owned local repository:
+New image builds install these packages through apt from a root-owned local
+repository:
 
-- `linux-image-7.3.0-rc4-ux3607oa`, version `7.3~rc4-1+ux3607oa2`:
+- `linux-image-7.3.0-rc4-ux3607oa`, version `7.3~rc4-1+ux3607oa4`:
   upstream `bindeb-pkg` image, modules, DTBs, configuration, System.map, and
   standard Debian kernel maintainer hooks.
-- `ux3607oa-boot-support`: board-aware GRUB generation,
+- `ux3607oa-boot-support`, version `1.0-6`: board-aware GRUB generation,
   initramfs contents, firmware dependencies and kernel/initramfs update hooks.
-- `firmware-ux3607oa-local`, version `1.312.4500.0-1`: locally extracted ASUS
-  ADSP/CDSP firmware, with archive provenance and per-file hashes.
+- `firmware-ux3607oa-local`, version `1.312.4500.0-2`: locally extracted ASUS
+   ADSP/CDSP firmware and exact-model Wi-Fi board data, with provenance/hashes.
+
+The latest build is a **kernel/package update**, not a rebuilt pair of USB disk
+images. Existing `.img`/`.img.zst` files remain at kernel package revision
+`+ux3607oa3` until explicitly rebuilt or upgraded. The running laptop is not
+changed by building these packages.
+
+The pristine source stays in `work/linux`; the patched source is a separate
+detached worktree identified by the patch manifest hash. Unexpected source
+edits are rejected rather than overwritten. Patch hashes and the patched Git
+tree ID are saved in `artifacts/kernel/patches.sha256` and `source-tree`.
+
+To upgrade a booted installation, transfer the three new packages to it, then
+run this there with the USB EFI partition mounted at `/boot/efi`:
+
+```sh
+sudo apt install ./linux-image-7.3.0-rc4-ux3607oa_7.3~rc4-1+ux3607oa4_arm64.deb \
+   ./ux3607oa-boot-support_1.0-6_arm64.deb \
+   ./firmware-ux3607oa-local_1.312.4500.0-2_all.deb
+sudo reboot
+```
+
+Use the **normal ASUS boot entry** to test native display; the recovery entry
+deliberately blacklists MSM. Keep USB Ethernet/SSH available and HDMI unplugged
+for the first test. Reboot after installing: the package retains the kernel
+release name and replaces that release's modules; do not hot-load new modules
+into the previous running kernel. The raw updated kernel is `artifacts/kernel/Image`.
 
 Kernel headers and debug-symbol packages are not built. The generated custom
 `linux-libc-dev` package is deliberately **not** installed or shipped; Debian
@@ -94,6 +126,18 @@ Debian `firmware-qcom-soc` and `firmware-atheros` supply the Gen8 GPU and QCC207
 wireless firmware. `wireless-regdb` uses its **upstream-signed** alternative,
 matching this upstream kernel's built-in regulatory verification keys.
 
+The local firmware package adds the board-data entry from
+[the exact UX3607OA report, kernel bug 221984](https://bugzilla.kernel.org/show_bug.cgi?id=221984):
+PCI subsystem `105b:e14f`, QMI chip 33, board 255, variant `UX3407Q`. The pinned
+reporter's payload is encoded into Debian firmware-atheros 20260810-1's board
+container using a checksum-pinned `ath12k-bdencoder`. Validation requires exactly
+one board addition with no existing calibration or regulatory entries changed.
+The package installs it under `/usr/lib/firmware/updates/ath12k/QCC2072/hw1.0/`,
+so Debian's original file remains owned and maintained by Debian. This override
+takes precedence even after a Debian firmware upgrade; remove/rebuild the local
+override when the correct entry becomes available upstream. The payload differs
+from the ASUS BSP copy and is recorded separately in the package provenance.
+
 The [official ASUS UX3607OA bundle](https://www.asus.com/supportonly/ux3607oa/helpdesk_download/)
 version 1.312.4500.0, released 2026-07-23, supplies the exact board ADSP/CDSP
 payloads. Its published SHA-256 is
@@ -112,7 +156,13 @@ installation. No firmware from a different Qualcomm board is substituted.
 Speaker playback was reported by the patch author, but Debian's installed
 firmware/UCM set lacks the exact `GLYMUR-ASUS-Zenbook-A16-UX3607OA` audio profile.
 Audio is not promised by these images; a CRD speaker configuration is not forced
-onto this laptop. Camera, microphone, suspend/resume, video acceleration, NPU,
+onto this laptop. The LPASS driver is now enabled, but it cannot replace the
+missing board-specific topology/UCM. The UART Bluetooth patch requests the
+`orn*` firmware family; Debian includes the revision-11 set, but the laptop's
+controller revision and NVM/calibration compatibility still need physical
+validation. No ASUS `cln*` files are renamed to another firmware family.
+The separate HDMI `com_aux` clock failure remains unresolved.
+Camera, microphone, suspend/resume, video acceleration, NPU,
 touchscreen, battery runtime and thermals are also not validated here.
 
 ## Booting
@@ -130,10 +180,69 @@ touchscreen, battery runtime and thermals are also not validated here.
    the USB device. The removable path is `EFI/BOOT/BOOTAA64.EFI`.
 5. Select the default ASUS entry. GRUB supplies the exact board DTB and
    `acpi=off`. The second entry disables the native MSM display driver for
-   troubleshooting. The third entry is **only for QEMU**, never the laptop.
+   troubleshooting and preserves firmware-enabled clocks and power domains.
+   The third entry is **only for QEMU**, never the laptop.
 
 The GPT/root filesystem does not automatically expand to fill a larger stick.
 Use a partition editor if additional persistent space is needed.
+
+## Black-Screen Recovery
+
+If the laptop keeps running but its display goes black shortly after early boot
+messages, highlight the **basic display** GRUB entry, press **e**, and append
+the following to the line starting with `linux`:
+
+```text
+clk_ignore_unused pd_ignore_unused
+```
+
+Keep the existing `root=`, `acpi=off`, console and other arguments. Press
+**Ctrl+X** or **F10** to boot this one-time edit. On the normal entry, append the
+complete fallback instead:
+
+```text
+nomodeset module_blacklist=msm clk_ignore_unused pd_ignore_unused
+```
+
+The first two arguments prevent native MSM graphics takeover; the last two
+stop unused-clock/power-domain cleanup from shutting down display resources
+left enabled by UEFI. This is a diagnostic workaround, not a confirmed native
+display fix. It relies on a usable UEFI framebuffer and can increase power use;
+do not make these flags global defaults. For an intermediate test that keeps
+native graphics enabled, add only `clk_ignore_unused pd_ignore_unused` to the
+normal entry.
+
+The original image contained `simpledrm` but had `CONFIG_SYSFB_SIMPLEFB` disabled
+and no `efidrm` driver. It could use legacy efifb for early text, but not the
+intended EFI-to-simpledrm fallback. Kernel package revision `+ux3607oa3` enables
+that handoff; boot-support `1.0-5` includes all four recovery arguments only in
+the basic-display entry. The default hardware boot entry is unchanged.
+The image verifier checks the config, initramfs module, and separation between
+normal and recovery arguments. The actual panel/eDP/clock drivers and Gen8 GPU
+firmware were already present in the original CLI initramfs.
+
+These build checks cannot establish why native display fails on this laptop.
+Physical verification is still required; no QEMU graphics testing is used.
+Once the recovery entry gives a console, enable persistent kernel logging:
+
+```sh
+sudo mkdir -p /var/log/journal
+sudo systemd-tmpfiles --create --prefix /var/log/journal
+sudo journalctl --flush
+```
+
+For a diagnostic native boot, use the normal entry without `nomodeset` or
+`module_blacklist=msm`, and append `drm.debug=0x1ff log_buf_len=8M`. If it goes
+black, shut down gracefully with the power button, boot the recovery entry,
+and collect the previous boot's kernel log:
+
+```sh
+sudo journalctl -k -b -1 --no-pager > ux3607oa-native-kernel.log
+```
+
+That log can distinguish a failed panel/DP probe, deferred dependencies,
+firmware loading errors and resource shutdown. Without it, adding unrelated
+driver patches would be speculative.
 
 ## Rebuilding And Testing
 
