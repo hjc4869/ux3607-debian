@@ -40,11 +40,26 @@ if grep -qx 'CONFIG_DRM_SIMPLEDRM=m' "$mount_dir/boot/config-$kernel_release"; t
     lsinitramfs "$mount_dir/boot/initrd.img-$kernel_release" \
         | grep -E '(^|/)simpledrm[.]ko([.](xz|gz|zst))?$' > /dev/null
 fi
+if ! grep -qx 'CONFIG_ARM_SCMI_CPUFREQ=y' "$mount_dir/boot/config-$kernel_release"; then
+    printf 'Missing SCMI CPU frequency scaling driver\n' >&2
+    exit 1
+fi
+find "$mount_dir/usr/lib/modules/$kernel_release/kernel/drivers/platform/arm64" \
+    -name 'asus-glymur-ec.ko*' | grep -q .
 dtb_path="/usr/lib/linux-image-$kernel_release/qcom/glymur-asus-zenbook-a16-ux3607oa.dtb"
 [[ $(fdtget "$mount_dir$dtb_path" / compatible) == 'asus,zenbook-a16-ux3607oa qcom,glymur' ]]
+[[ $(fdtget "$mount_dir$dtb_path" /soc@0/geniqup@ac0000/i2c@a84000/embedded-controller@76 compatible) \
+    == asus,zenbook-a16-ux3607oa-ec ]]
+tplg_path=/usr/lib/firmware/updates/qcom/glymur/GLYMUR-ASUS-Zenbook-A16-UX3607OA-tplg.bin
+[[ -s $mount_dir$tplg_path ]]
+[[ $(chroot "$mount_dir" readlink -f "$tplg_path") == /usr/lib/firmware/updates/qcom/glymur/ASUSTeK/UX3607OA/GLYMUR-ASUS-Zenbook-A16-UX3607OA-tplg.bin ]]
+[[ -s $mount_dir/usr/share/alsa/ucm2/conf.d/glymur/GLYMUR-ASUS-Zenbook-A16-UX3607OA.conf ]]
+grep -q '/Qualcomm/glymur/ux3607oa/ZenbookA16-HiFi.conf' \
+    "$mount_dir/usr/share/alsa/ucm2/conf.d/glymur/GLYMUR-ASUS-Zenbook-A16-UX3607OA.conf"
 chroot "$mount_dir" grub-script-check /boot/grub/grub.cfg
 recovery_arguments=$(awk '/^menuentry .*basic display/ {recovery=1} recovery && $1 == "linux" {print; exit}' "$mount_dir/boot/grub/grub.cfg")
 default_arguments=$(awk '$1 == "linux" {print; exit}' "$mount_dir/boot/grub/grub.cfg")
+[[ " $default_arguments " == *" /boot/vmlinuz-$kernel_release "* ]]
 for argument in nomodeset module_blacklist=msm clk_ignore_unused pd_ignore_unused; do
     [[ " $recovery_arguments " == *" $argument "* ]]
     [[ " $default_arguments " != *" $argument "* ]]

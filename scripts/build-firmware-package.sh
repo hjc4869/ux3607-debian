@@ -2,6 +2,8 @@
 set -Eeuo pipefail
 
 project_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+# shellcheck source=versions.sh
+source "$project_dir/scripts/versions.sh"
 archive_path="$project_dir/work/asus-ux3607oa-bsp.exe"
 extract_dir="$project_dir/work/asus-bsp"
 package_dir="$project_dir/work/firmware-package"
@@ -40,8 +42,10 @@ wifi_blob="$project_dir/work/ux3607oa-ncm820a-board.elf"
 wifi_commit=d2d3e6a9ac17dd2e4f0ac64fec2afc10d3978e8c
 wifi_url="https://raw.githubusercontent.com/misyltoad/asus-zenbook-a16-wifi-firmware-patch/$wifi_commit/bdwlan_qcc2072_1p0_ncm820A.elf"
 wifi_sha256=960e9e93da708f5e1086ce15d82d3e44d846ec9441eac40e1725467d357965d8
+# deb.debian.org drops superseded versions from the pool; snapshot.debian.org keeps
+# the pinned build permanently, so the board-data baseline stays reproducible.
 download_verified "$atheros_package" \
-    https://deb.debian.org/debian/pool/non-free-firmware/f/firmware-nonfree/firmware-atheros_20260810-1_all.deb \
+    https://snapshot.debian.org/archive/debian/20260818T205150Z/pool/non-free-firmware/f/firmware-nonfree/firmware-atheros_20260810-1_all.deb \
     69b36b88f042776af239c690bfd942088c4e58c39c9edc5510f800f2c06bbeee
 download_verified "$encoder_path" \
     https://raw.githubusercontent.com/qca/qca-swiss-army-knife/6df4dae3e2f5e4c2903f3cafd40996fc1b3639ce/tools/scripts/ath12k/ath12k-bdencoder \
@@ -59,9 +63,20 @@ grep -Fx '1 board image(s) added, 0 changed, 0 deleted, 4 in total' "$project_di
 grep -Fx '0 regdb image(s) added, 0 changed, 0 deleted, 1 in total' "$project_dir/artifacts/wifi-board-diff.txt"
 python3 "$encoder_path" --info "$board_override" > "$project_dir/artifacts/wifi-board-info.txt"
 
-cat > "$package_dir/DEBIAN/control" <<'EOF'
+# Upstream linux-firmware ships the A16 AudioReach topology (BSD-3-Clause) under the
+# card name the kernel requests. Debian's firmware-qcom-soc does not include it yet.
+tplg_commit=466e500db134efb2090d52b9b6b1104ce43e8ed2
+tplg_name=GLYMUR-ASUS-Zenbook-A16-UX3607OA-tplg.bin
+tplg_url="https://gitlab.com/kernel-firmware/linux-firmware/-/raw/$tplg_commit/qcom/glymur/ASUSTeK/UX3607OA/$tplg_name"
+tplg_sha256=ea851335b7e8e13977a597250f2c0f1b6434d68f2248ae85a332e158fd64db57
+tplg_dir="$package_dir/usr/lib/firmware/updates/qcom/glymur"
+download_verified "$project_dir/work/$tplg_name" "$tplg_url" "$tplg_sha256"
+install -D -m 644 "$project_dir/work/$tplg_name" "$tplg_dir/ASUSTeK/UX3607OA/$tplg_name"
+ln -sfn "ASUSTeK/UX3607OA/$tplg_name" "$tplg_dir/$tplg_name"
+
+cat > "$package_dir/DEBIAN/control" <<EOF
 Package: firmware-ux3607oa-local
-Version: 1.312.4500.0-2
+Version: $firmware_package_version
 Architecture: all
 Maintainer: UX3607OA Local Image Builder <builder@ux3607oa.invalid>
 Section: non-free-firmware/kernel
@@ -72,6 +87,7 @@ Description: ASUS UX3607OA DSP firmware and Wi-Fi board data
  UX3607OA support archive. Vendor licensing applies; not for redistribution.
  Includes the exact-model QCC2072 calibration entry from kernel bug 221984
  as a firmware override without replacing Debian-owned board data.
+ Adds the upstream linux-firmware AudioReach topology under the A16 card name.
  SoCCP binaries are not included: normal boot uses the UEFI-loaded subsystem.
 EOF
 cat > "$package_dir/DEBIAN/postinst" <<'EOF'
@@ -86,9 +102,12 @@ printf 'ASUS UX3607OA support archive\nVersion: 1.312.4500.0\nURL: %s\nSHA256: %
     "$archive_url" "$archive_sha256" > "$package_dir/usr/share/doc/firmware-ux3607oa-local/PROVENANCE"
 printf '\nQCC2072 board data: kernel bug 221984, exact 105b:e14f variant UX3407Q.\nURL: %s\nSHA256: %s\nDebian baseline: firmware-atheros 20260810-1.\nEncoder: qca-swiss-army-knife 6df4dae3e2f5e4c2903f3cafd40996fc1b3639ce.\nThe board payload differs from the ASUS BSP copy and follows the exact-model report.\n' \
     "$wifi_url" "$wifi_sha256" >> "$package_dir/usr/share/doc/firmware-ux3607oa-local/PROVENANCE"
+printf '\nAudioReach topology: linux-firmware %s, BSD-3-Clause (LICENCE.linaro).\nURL: %s\nSHA256: %s\nInstalled under firmware/updates so a future Debian copy cannot conflict.\n' \
+    "$tplg_commit" "$tplg_url" "$tplg_sha256" >> "$package_dir/usr/share/doc/firmware-ux3607oa-local/PROVENANCE"
 (cd "$package_dir" && find usr/lib/firmware -type f -print0 | sort -z | xargs -0 sha256sum) \
     > "$project_dir/artifacts/board-firmware-sha256.txt"
 cp "$project_dir/artifacts/board-firmware-sha256.txt" \
     "$package_dir/usr/share/doc/firmware-ux3607oa-local/SHA256SUMS"
+chmod -R go-w "$package_dir"
 dpkg-deb --root-owner-group --build "$package_dir" \
-    "$project_dir/artifacts/packages/firmware-ux3607oa-local_1.312.4500.0-2_all.deb"
+    "$project_dir/artifacts/packages/firmware-ux3607oa-local_${firmware_package_version}_all.deb"

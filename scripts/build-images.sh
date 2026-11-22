@@ -7,6 +7,8 @@ if [[ $EUID != 0 ]]; then
 fi
 export PATH=/usr/sbin:/usr/bin:/sbin:/bin
 export DEBIAN_FRONTEND=noninteractive
+# shellcheck source=versions.sh
+source "$project_dir/scripts/versions.sh"
 work_dir="$project_dir/work"
 artifacts_dir="$project_dir/artifacts"
 cli_root="$work_dir/rootfs-cli"
@@ -42,6 +44,22 @@ mount_chroot() {
     mounts+=("$root_dir/run")
 }
 
+stage_packages() {
+    local repository="$1/usr/local/share/ux3607oa/repository" package_path
+    local packages=(
+        "linux-image-${kernel_release}_${kernel_package_version}_arm64.deb"
+        "ux3607oa-boot-support_${support_package_version}_arm64.deb"
+        "firmware-ux3607oa-local_${firmware_package_version}_all.deb"
+    )
+    [[ $(< "$artifacts_dir/kernel/release") == "$kernel_release" ]]
+    mkdir -p "$repository"
+    rm -f "$repository"/*.deb
+    for package_path in "${packages[@]}"; do
+        install -m 644 "$artifacts_dir/packages/$package_path" "$repository/"
+    done
+    (cd "$repository" && dpkg-scanpackages . /dev/null > Packages)
+}
+
 policy_rc() {
     printf '#!/bin/sh\nexit 101\n' > "$1/usr/sbin/policy-rc.d"
     chmod 755 "$1/usr/sbin/policy-rc.d"
@@ -60,14 +78,9 @@ bootstrap() {
 configure_cli() {
     [[ ! -e "$work_dir/cli.complete" ]] || return 0
     bootstrap
-    [[ -s "$artifacts_dir/kernel/release" ]]
-    local kernel_release
-    kernel_release=$(< "$artifacts_dir/kernel/release")
-    [[ -f "$artifacts_dir/packages/linux-image-${kernel_release}_7.3~rc4-1+ux3607oa4_arm64.deb" ]]
     policy_rc "$cli_root"
-    mkdir -p "$cli_root/usr/local/share/ux3607oa/repository" "$cli_root/etc/initramfs-tools/conf.d"
-    cp "$artifacts_dir/packages/"*.deb "$cli_root/usr/local/share/ux3607oa/repository/"
-    (cd "$cli_root/usr/local/share/ux3607oa/repository" && dpkg-scanpackages . /dev/null > Packages)
+    mkdir -p "$cli_root/etc/initramfs-tools/conf.d"
+    stage_packages "$cli_root"
     printf 'deb [trusted=yes] file:/usr/local/share/ux3607oa/repository ./\n' \
         > "$cli_root/etc/apt/sources.list.d/ux3607oa-local.list"
     printf 'MODULES=most\nCOMPRESS=zstd\n' > "$cli_root/etc/initramfs-tools/conf.d/ux3607oa"
@@ -149,8 +162,7 @@ refresh_packages() {
     policy_rc "$root_dir"
     rm -f "$root_dir/etc/resolv.conf"
     cp -L /etc/resolv.conf "$root_dir/etc/resolv.conf"
-    cp "$artifacts_dir/packages/"*.deb "$root_dir/usr/local/share/ux3607oa/repository/"
-    (cd "$root_dir/usr/local/share/ux3607oa/repository" && dpkg-scanpackages . /dev/null > Packages)
+    stage_packages "$root_dir"
     mount_chroot "$root_dir"
     chroot "$root_dir" apt-get update
     chroot "$root_dir" apt-get install -y ux3607oa-boot-support firmware-ux3607oa-local wireless-regdb

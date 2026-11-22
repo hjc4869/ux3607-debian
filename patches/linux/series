@@ -4,3 +4,14 @@
 0004-bluetooth-qca-qcc2072.patch
 0005-pwrseq-m2-qcc2072.patch
 0006-bluetooth-qca-m2-pwrseq.patch
+0007-glymur-usb-clock-power-votes.patch
+0008-zenbook-a16-mic-sample-rate.patch
+0009-drm-msm-a6xx-rpmh-dep-votes.patch
+0010-drm-msm-a8xx-perfmode-bw.patch
+0011-pmic-glink-early-rpmsg-probe.patch
+0012-ath12k-regd-update-completion.patch
+0013-ath12k-dangling-channel-pointers.patch
+0014-ath12k-qcc2072-mlo-4way-handshake.patch
+0015-dt-bindings-asus-zenbook-a16-ec.patch
+0016-platform-asus-glymur-ec.patch
+0017-zenbook-a16-embedded-controller.patch

@@ -3,12 +3,20 @@ set -eu
 
 test -r /etc/ux3607oa/image.conf || exit 0
 . /etc/ux3607oa/image.conf
-kernel_release=$(find /boot -maxdepth 1 -name 'vmlinuz-*-ux3607oa' -printf '%f\n' | sort -V | tail -n 1)
-kernel_release=${kernel_release#vmlinuz-}
+kernel_releases=$(find /boot -maxdepth 1 -name 'vmlinuz-*-ux3607oa' -printf '%f\n' | sed 's/^vmlinuz-//' | sort -V)
+kernel_release=$(printf '%s\n' "$kernel_releases" | tail -n 1)
 test -n "$kernel_release" || exit 0
 test -s "/boot/initrd.img-$kernel_release" || exit 0
 dtb="/usr/lib/linux-image-$kernel_release/qcom/glymur-asus-zenbook-a16-ux3607oa.dtb"
 test -s "$dtb"
+previous_release=''
+for candidate in $(printf '%s\n' "$kernel_releases" | sed '$d' | sort -rV); do
+    if test -s "/boot/initrd.img-$candidate" &&
+        test -s "/usr/lib/linux-image-$candidate/qcom/glymur-asus-zenbook-a16-ux3607oa.dtb"; then
+        previous_release=$candidate
+        break
+    fi
+done
 mkdir -p /boot/grub
 cat > /boot/grub/grub.cfg <<EOF
 set timeout=10
@@ -31,6 +39,15 @@ menuentry 'Debian sid - QEMU ARM64 validation only' {
     initrd /boot/initrd.img-$kernel_release
 }
 EOF
+if test -n "$previous_release"; then
+    cat >> /boot/grub/grub.cfg <<EOF
+menuentry 'Debian sid - ASUS UX3607OA - previous kernel $previous_release' {
+    linux /boot/vmlinuz-$previous_release root=UUID=$ROOT_UUID rw rootwait acpi=off console=tty0
+    initrd /boot/initrd.img-$previous_release
+    devicetree /usr/lib/linux-image-$previous_release/qcom/glymur-asus-zenbook-a16-ux3607oa.dtb
+}
+EOF
+fi
 grub-script-check /boot/grub/grub.cfg
 if mountpoint -q /boot/efi; then
     mkdir -p /boot/efi/EFI/BOOT

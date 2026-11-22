@@ -7,6 +7,9 @@ if {$variant ni {cli kde}} {
 }
 set project_dir [file normalize [file join [file dirname [info script]] ..]]
 set image_path "$project_dir/artifacts/debian-sid-ux3607oa-$variant.img"
+set release_file [open "$project_dir/artifacts/kernel/release"]
+set kernel_release [string trim [read $release_file]]
+close $release_file
 set variables_path "$project_dir/work/uefi-$variant-vars.fd"
 file copy -force /usr/share/AAVMF/AAVMF_VARS.fd $variables_path
 log_file -a -noappend "$project_dir/artifacts/$variant-uefi-boot.log"
@@ -54,7 +57,10 @@ expect -exact "UX3607-SUDO: "
 send "Qemu-Validation-2026!\r"
 expect -re {UX3607-TEST> $}
 set stage "package and service validation"
-send {uname -a; findmnt /; dpkg-query -W linux-image-7.3.0-rc4-ux3607oa ux3607oa-boot-support; sudo -n apt-get check && test -z "$(sudo -n dpkg --audit)" && test "$(uname -r)" = 7.3.0-rc4-ux3607oa && systemctl is-active NetworkManager && printf '\nUX3607_BOOT_VALIDATED\n'}
+send "uname -a; findmnt /; dpkg-query -W linux-image-$kernel_release ux3607oa-boot-support; "
+send {sudo -n apt-get check && test -z "$(sudo -n dpkg --audit)" && }
+send "test \"\$(uname -r)\" = $kernel_release && "
+send {systemctl is-active NetworkManager && printf '\nUX3607_BOOT_VALIDATED\n'}
 send "\r"
 expect {
     -re {[\r\n]UX3607_BOOT_VALIDATED[\r\n]} {}

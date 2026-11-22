@@ -3,21 +3,15 @@
  1 file changed, 2 insertions(+)
 
 diff --git a/drivers/power/sequencing/pwrseq-pcie-m2.c b/drivers/power/sequencing/pwrseq-pcie-m2.c
-index ddfe6ca82494..b9fb10901b14 100644
+index e42e85f47..2c3ba08eb 100644
 --- a/drivers/power/sequencing/pwrseq-pcie-m2.c
 +++ b/drivers/power/sequencing/pwrseq-pcie-m2.c
-@@ -189,6 +189,8 @@ static const struct pci_device_id pwrseq_m2_pci_ids[] = {
- 	  .driver_data = (kernel_ulong_t)"qcom,wcn6855-bt" },
- 	{ PCI_DEVICE_SUB(PCI_VENDOR_ID_QCOM, 0x1107, PCI_VENDOR_ID_QCOM, 0x337c),
+@@ -199,6 +199,8 @@ static const struct pci_device_id pwrseq_m2_pci_ids[] = {
+ 	  .driver_data = (kernel_ulong_t)"qcom,wcn7850-bt" },
+ 	{ PCI_DEVICE_SUB(PCI_VENDOR_ID_QCOM, 0x1107, PCI_VENDOR_ID_LENOVO, 0xe0e9),
  	  .driver_data = (kernel_ulong_t)"qcom,wcn7850-bt" },
 +	{ PCI_DEVICE(PCI_VENDOR_ID_QCOM, 0x1112),
 +	  .driver_data = (kernel_ulong_t)"qcom,qcc2072-bt" },
  	{ } /* Sentinel */
  };
  
-
--- 
-2.34.1
-
-
-

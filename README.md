@@ -31,29 +31,65 @@ USB-A/USB-C, SD reader, QCC2072 Wi-Fi/Bluetooth, and four-speaker playback.
 Touchscreen support was untested. Iris video acceleration was deferred.
 
 The [board commit](https://github.com/torvalds/linux/commit/e8fbbca94db752ab94d9dadf2f65872905eafecd)
-is merged into the 7.3 development series, not 7.2. The selected upstream release
-also contains the board's QSEECOM allowlist entry, SoCCP support, TCSR support,
-basic Glymur display PHY support, and PCI power-control support. The board DTS
-alone does not provide all working-device prerequisites. The build now applies
-the six-patch [kernel series](patches/linux/README.md), including the missing
-eDP v8 programming fixes and generic QCC2072 UART/M.2 Bluetooth support. No
-unrelated board DTS overlays or speculative HDMI clock workarounds are applied.
+is in Linux 7.3. That release also contains the board's QSEECOM allowlist entry,
+SoCCP support, TCSR support, basic Glymur display PHY support, and PCI
+power-control support. The board DTS alone does not provide all working-device
+prerequisites. The build applies the 17-patch
+[kernel series](patches/linux/README.md):
 
-Kernel: **7.3.0-rc4-ux3607oa**, upstream tag `v7.3-rc4`, commit
-`93f51579e7df248780214094418f205253383cc5` (2026-09-20).
-This is a release candidate, not a stable/security-maintained Debian kernel.
+- the missing eDP v8 programming fixes;
+- generic QCC2072 UART/M.2 Bluetooth support;
+- mainline 7.4 fixes for Glymur USB votes, A16 microphones, Adreno X2 power
+  votes, PMIC GLINK and ath12k;
+- the Wi-Fi 7 MLO handshake fix;
+- the ASUS EC driver and device-tree node, for fan RPM, EC temperatures and the
+  keyboard backlight.
+
+No speculative HDMI clock workarounds are applied.
+
+Kernel: **7.3.4-ux3607oa**, upstream stable tag `v7.3.4`, commit
+`7595a62d45ee1a2297eafa5f2ef5d0a45142d84d` (2026-11-10).
+This is an upstream stable release, but this local build gets no automatic
+Debian security updates.
+
+## CPU Frequency Scaling
+
+Earlier builds inherited Debian's `# CONFIG_ARM_SCMI_CPUFREQ is not set`. The
+laptop's firmware answered SCMI (its boot log shows `scmi-perf-domain:
+Initialized 3 performance domains`), but no cpufreq driver attached. The cores
+stayed at whatever speed UEFI left them: no scaling up for load, no scaling down
+at idle, and no CPU cooling devices.
+
+Kernel `+ux3607oa1` builds `scmi-cpufreq` in and builds the CPUCP mailbox driver
+in, rather than as a module. The A16 community investigation found that a
+modular mailbox lost completion interrupts for SCMI performance requests, and
+that building it in restored them. Ubuntu Concept also enables SCMI cpufreq.
+After booting, check:
+
+```sh
+cat /sys/devices/system/cpu/cpufreq/policy*/scaling_driver   # expect: scmi
+grep . /sys/devices/system/cpu/cpufreq/policy*/scaling_cur_freq
+sudo journalctl -k -b | grep -iE 'scmi|cpufreq'
+```
+
+If `scmi-cpufreq` probes but logs `-110` timeouts, report that log. The fallback
+used on the A16 community tree is `arm,no-completion-irq` on the `scmi` node,
+which is not applied here.
 
 ## Debian Configuration And Packaging
 
-The baseline is Debian's standard 4 KiB-page ARM64 configuration from
-`linux-config-7.2_7.2.6-1_arm64.deb`, SHA-256
-`3077a50e9fb9764ac3e7b0e92200ba1fa23747857ce55213ab26ee81e3eb120c`.
+The baseline is Debian sid's own standard 4 KiB-page ARM64 configuration for the
+same upstream release, `linux-config-7.3_7.3.4-1_arm64.deb`, SHA-256
+`cac059543a40e3c0aa5a126676d00d82d92f7f8c2873ad2f6d3bddf831be25c3`.
 It is migrated with `olddefconfig`, not replaced with ARM64 defconfig.
 
 [config/kernel.config](config/kernel.config) contains the small local delta:
 kernel identity/signing settings, Glymur clocks/interconnect, its required M31
-eUSB2 PHY, the SM8650 LPASS pinctrl fallback used by Glymur audio, and simpledrm
-fallback with `CONFIG_SYSFB_SIMPLEFB=y` for EFI handoff.
+eUSB2 PHY, the SM8650 LPASS pinctrl fallback used by Glymur audio, simpledrm
+fallback with `CONFIG_SYSFB_SIMPLEFB=y` for EFI handoff, built-in SCMI cpufreq
+and CPUCP mailbox, and the ASUS EC driver. Debian 7.3.4 still lacks all of these
+except the CPUCP mailbox, which it builds as a module.
+Pinned versions and input checksums are in [scripts/versions.sh](scripts/versions.sh).
 Debian's module, security, filesystem and
 debug/BTF settings are retained where supported by upstream and the toolchain.
 Removed/new symbols and unavailable Rust settings are recorded in
@@ -63,18 +99,22 @@ configuration are saved alongside it.
 New image builds install these packages through apt from a root-owned local
 repository:
 
-- `linux-image-7.3.0-rc4-ux3607oa`, version `7.3~rc4-1+ux3607oa4`:
+- `linux-image-7.3.4-ux3607oa`, version `7.3.4-1+ux3607oa1`:
   upstream `bindeb-pkg` image, modules, DTBs, configuration, System.map, and
   standard Debian kernel maintainer hooks.
-- `ux3607oa-boot-support`, version `1.0-6`: board-aware GRUB generation,
-  initramfs contents, firmware dependencies and kernel/initramfs update hooks.
-- `firmware-ux3607oa-local`, version `1.312.4500.0-2`: locally extracted ASUS
-   ADSP/CDSP firmware and exact-model Wi-Fi board data, with provenance/hashes.
+- `ux3607oa-boot-support`, version `1.0-7`: board-aware GRUB generation,
+  initramfs contents, firmware dependencies, kernel/initramfs update hooks, and
+  the upstream A16 ALSA UCM profile ([config/alsa-ucm2](config/alsa-ucm2/README.md)).
+  GRUB adds a **previous kernel** entry when an older `-ux3607oa` kernel is
+  still installed.
+- `firmware-ux3607oa-local`, version `1.312.4500.0-3`: locally extracted ASUS
+  ADSP/CDSP firmware, exact-model Wi-Fi board data, and the A16 audio topology
+  from upstream linux-firmware, with provenance/hashes.
 
 The latest build is a **kernel/package update**, not a rebuilt pair of USB disk
-images. Existing `.img`/`.img.zst` files remain at kernel package revision
-`+ux3607oa3` until explicitly rebuilt or upgraded. The running laptop is not
-changed by building these packages.
+images. Existing `.img`/`.img.zst` files keep their older packages until they
+are explicitly rebuilt or upgraded. The running laptop is not changed by
+building these packages.
 
 The pristine source stays in `work/linux`; the patched source is a separate
 detached worktree identified by the patch manifest hash. Unexpected source
@@ -85,17 +125,20 @@ To upgrade a booted installation, transfer the three new packages to it, then
 run this there with the USB EFI partition mounted at `/boot/efi`:
 
 ```sh
-sudo apt install ./linux-image-7.3.0-rc4-ux3607oa_7.3~rc4-1+ux3607oa4_arm64.deb \
-   ./ux3607oa-boot-support_1.0-6_arm64.deb \
-   ./firmware-ux3607oa-local_1.312.4500.0-2_all.deb
+sudo apt install ./linux-image-7.3.4-ux3607oa_7.3.4-1+ux3607oa1_arm64.deb \
+   ./ux3607oa-boot-support_1.0-7_arm64.deb \
+   ./firmware-ux3607oa-local_1.312.4500.0-3_all.deb
 sudo reboot
 ```
 
+The new kernel has a new release name, so the 7.3.0-rc4 kernel stays installed
+and appears as the last GRUB entry, **previous kernel 7.3.0-rc4-ux3607oa**. Use it
+if 7.3.4 misbehaves. Remove it with `apt remove linux-image-7.3.0-rc4-ux3607oa`
+once 7.3.4 is confirmed good.
+
 Use the **normal ASUS boot entry** to test native display; the recovery entry
 deliberately blacklists MSM. Keep USB Ethernet/SSH available and HDMI unplugged
-for the first test. Reboot after installing: the package retains the kernel
-release name and replaces that release's modules; do not hot-load new modules
-into the previous running kernel. The raw updated kernel is `artifacts/kernel/Image`.
+for the first test. The raw updated kernel is `artifacts/kernel/Image`.
 
 Kernel headers and debug-symbol packages are not built. The generated custom
 `linux-libc-dev` package is deliberately **not** installed or shipped; Debian
@@ -153,17 +196,63 @@ are not supplied. A BIOS that does not perform early boot, or SoCCP crash/restar
 can therefore require those files from the same machine's firmware/Windows
 installation. No firmware from a different Qualcomm board is substituted.
 
-Speaker playback was reported by the patch author, but Debian's installed
-firmware/UCM set lacks the exact `GLYMUR-ASUS-Zenbook-A16-UX3607OA` audio profile.
-Audio is not promised by these images; a CRD speaker configuration is not forced
-onto this laptop. The LPASS driver is now enabled, but it cannot replace the
-missing board-specific topology/UCM. The UART Bluetooth patch requests the
+Speaker playback was reported by the patch author. Debian's firmware and UCM
+packages still lack the `GLYMUR-ASUS-Zenbook-A16-UX3607OA` profile, so the local
+packages now supply both upstream pieces:
+
+- **Topology:** linux-firmware commit `466e500db134` ships the A16 AudioReach
+  topology. It is byte-identical to the Glymur CRD topology Debian already
+  ships; the kernel only needs it under the A16 card name. It is installed
+  under `/usr/lib/firmware/updates/qcom/glymur/`.
+- **UCM:** Konrad Dybcio's upstream alsa-ucm-conf commit `d260eedd1900` provides
+  four-speaker and two-DMIC routing for this laptop. Every codec file it
+  includes is identical in Debian's alsa-ucm-conf 1.2.16.1.
+
+Mainline's A16 microphone sample-rate fix is in the kernel series. Speakers and
+microphones are still untested on hardware here; headphone and HDMI audio are
+not in the upstream profile.
+
+Wi-Fi 7 routers using MLO could reject the A16 with `4WAY_HANDSHAKE_TIMEOUT`,
+which looks like a wrong password. Kernel patch 14 fixes the link lookup that
+dropped EAPOL frames. If it still happens, limit the router or the connection to
+Wi-Fi 6 and report the kernel log.
+
+The UART Bluetooth patch requests the
 `orn*` firmware family; Debian includes the revision-11 set, but the laptop's
 controller revision and NVM/calibration compatibility still need physical
 validation. No ASUS `cln*` files are renamed to another firmware family.
 The separate HDMI `com_aux` clock failure remains unresolved.
-Camera, microphone, suspend/resume, video acceleration, NPU,
-touchscreen, battery runtime and thermals are also not validated here.
+Camera, suspend/resume, video acceleration, NPU, touchscreen, battery runtime and
+thermals are also not validated here. The EC driver exposes fan RPM and EC
+temperatures through hwmon (`sensors`, or `/sys/class/hwmon/*/name` =
+`asus_glymur_ec`) and the keyboard backlight as `asus::kbd_backlight`. The fan
+curve stays under EC control.
+
+## Ubuntu Concept Comparison
+
+Reviewed on 2026-11-17 against the
+[Ubuntu Concept 26.10 Snapdragon thread](https://discourse.ubuntu.com/t/ubuntu-concept-26-10-snapdragon-edition/88518),
+its `linux-qcom-x1e` 7.3.0-31.31 kernel source and configuration, and the
+`ubuntu-x2e-settings` 34 package.
+
+Adopted, in the forms described above:
+
+- SCMI cpufreq enabled.
+- The eDP v8 pair and M.2 Bluetooth power sequencing (already carried).
+- The A16 topology and UCM that thread users installed by hand.
+- The Wi-Fi 7 handshake fix for the failure thread users reported.
+
+Not adopted:
+
+- **Global `clk_ignore_unused pd_ignore_unused regulator_ignore_unused`.**
+  `ubuntu-x2e-settings` sets these on every X2 boot. Here they stay limited to
+  the basic-display recovery entry, as documented under Black-Screen Recovery.
+- **`qcom-firmware-extract`.** Its A16 entry copies the same ASUS ADSP/CDSP
+  files that `firmware-ux3607oa-local` already takes from the checksum-pinned
+  ASUS bundle.
+- **Other boards' changes.** Ubuntu's PCIe3, camera and other-board patches do
+  not apply to the A16; Ubuntu carries no A16-specific kernel patch beyond the
+  ones above.
 
 ## Booting
 
@@ -181,7 +270,8 @@ touchscreen, battery runtime and thermals are also not validated here.
 5. Select the default ASUS entry. GRUB supplies the exact board DTB and
    `acpi=off`. The second entry disables the native MSM display driver for
    troubleshooting and preserves firmware-enabled clocks and power domains.
-   The third entry is **only for QEMU**, never the laptop.
+   The third entry is **only for QEMU**, never the laptop. A fourth entry,
+   **previous kernel**, appears only after an in-place kernel upgrade.
 
 The GPT/root filesystem does not automatically expand to fill a larger stick.
 Use a partition editor if additional persistent space is needed.

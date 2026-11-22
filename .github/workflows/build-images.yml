@@ -58,7 +58,7 @@ jobs:
           for script in packaging/*; do
             sh -n "$script"
           done
-          shellcheck scripts/*.sh
+          shellcheck -x -P SCRIPTDIR scripts/*.sh
           shellcheck -e SC1091,SC2154 packaging/*
           for ignored_path in work/linux/Makefile artifacts/test.img .env signing_key.pem; do
             git check-ignore -q "$ignored_path"
